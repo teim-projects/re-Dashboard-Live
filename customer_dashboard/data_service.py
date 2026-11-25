@@ -58,6 +58,30 @@ def get_user_wind_tables(user):
 
     return gen_tables, bd_tables
 
+
+def parse_date_like(value):
+    """Return date object or None. Accepts many formats."""
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    s = str(value).strip()
+    if not s or s.lower() in ("none", "null", "-", "na"):
+        return None
+    fmts = ["%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", "%d-%b-%Y", "%d %b %Y"]
+    for f in fmts:
+        try:
+            return datetime.strptime(s, f).date()
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(s).date()
+    except Exception:
+        return None
+
+
 def inspect_gen_table_cols(table_name):
     """Map canonical column names for a generation table."""
     with connection.cursor() as cursor:
@@ -76,8 +100,11 @@ def inspect_gen_table_cols(table_name):
         "ega": pick_column(col_map, "ga_ext", "ext_grid_avail", "ext_grid_availability"),
         "comb_ga": pick_column(col_map, "ga_day", "ga", "grid_availability"),
         "gf": pick_column(col_map, "gf", "grid_fault", "grid_fault_hrs"),
+        "fm": pick_column(col_map, "fm", "force_majeure"),
+        "s": pick_column(col_map, "s", "shutdown", "scheduled_services", "machine_shut_down_hrs"),
+        "u": pick_column(col_map, "u", "unscheduled", "unscheduled_services", "machine_fault_hrs"),
         "opr_hrs": pick_column(col_map, "opr_hrs", "operating_hours", "total_hrs", "total_hours"),
-        "gen_hrs": pick_column(col_map, "gen_hrs", "generation_hours", "production_hours"),
+        "gen_hrs": pick_column(col_map, "gen_hrs", "generation_hours", "production_hours", "daily_generation_hrs", "production_daily_hrs"),
         "provider": pick_column(col_map, "provider", "oem", "firm", "make"),
         "site": pick_column(col_map, "site", "wind_farm_name", "location"),
         "state": pick_column(col_map, "state"),
@@ -649,6 +676,7 @@ def get_generation_kwh_data(user, date_from=None, date_to=None, providers=None, 
 
         table_data.append({
             "rank": idx,
+            "wtg": item["wtg"],
             "wtg_no": item["wtg"],
             "oem": item["oem"],
             "generation": int(round(g)),
@@ -679,29 +707,66 @@ def get_generation_kwh_data(user, date_from=None, date_to=None, providers=None, 
 def get_generation_hours_data(user, date_from=None, date_to=None, providers=None, sites=None, states=None, wtgs=None, customers=None):
     """
     Compute data for wind_genration_hovers.html.
+    Compares Operating Hours vs Generation Hours across fleet turbines.
     """
     gen_tables, _ = get_user_wind_tables(user)
-    wtg_hrs = defaultdict(lambda: {"hrs": 0.0, "oem": "", "site": ""})
-    monthly_hrs = defaultdict(float)
+    wtg_hrs = defaultdict(lambda: {
+        "opr_hrs": 0.0,
+        "gen_hrs": 0.0,
+        "hrs": 0.0,
+        "day_count": 0,
+        "min_date": None,
+        "max_date": None,
+        "oem": "",
+        "site": "",
+    })
+    monthly_opr = defaultdict(float)
+    monthly_gen = defaultdict(float)
+    overall_min_date = None
+    overall_max_date = None
 
     with connection.cursor() as cursor:
         for t in gen_tables:
             cols = inspect_gen_table_cols(t)
             oem_name = infer_oem_from_table(t)
             wtg_col = cols["wtg"]
-            hrs_col = cols["hrs"]
-            date_col = cols["date"]
-            site_col = cols["site"]
+            gen_col = cols.get("gen_hrs") or cols.get("hrs")
+            opr_col = cols.get("opr_hrs")
+            date_col = cols.get("date")
+            site_col = cols.get("site")
 
-            if not wtg_col or not hrs_col:
+            if not wtg_col or not gen_col:
                 continue
+
+            with connection.cursor() as cur2:
+                cur2.execute(f"SHOW COLUMNS FROM `{t}`")
+                table_cols = [r[0].lower() for r in cur2.fetchall()]
+
+            if opr_col:
+                opr_expr = f"CAST(`{opr_col}` AS DECIMAL(15,2))"
+            elif "lull_hrs" in table_cols:
+                opr_expr = f"(CAST(`{gen_col}` AS DECIMAL(15,2)) + CAST(`lull_hrs` AS DECIMAL(15,2)))"
+            elif "bd_wtg" in table_cols:
+                opr_expr = f"GREATEST(CAST(`{gen_col}` AS DECIMAL(15,2)), 24.0 - COALESCE(CAST(`bd_wtg` AS DECIMAL(15,2)), 0))"
+            else:
+                opr_expr = f"CAST(`{gen_col}` AS DECIMAL(15,2))"
+
+            gen_expr = f"CAST(`{gen_col}` AS DECIMAL(15,2))"
 
             where_clause, params = build_where_clause(cols, date_from, date_to, providers, sites, states, wtgs, customers)
 
             select_parts = [
                 f"`{wtg_col}`",
-                f"SUM(CAST(`{hrs_col}` AS DECIMAL(15,2)))",
+                f"SUM({opr_expr})",
+                f"SUM({gen_expr})",
+                f"COUNT(DISTINCT `{date_col}`)" if date_col else f"COUNT({gen_expr})",
             ]
+            if date_col:
+                select_parts.append(f"MIN(`{date_col}`)")
+                select_parts.append(f"MAX(`{date_col}`)")
+            else:
+                select_parts.extend(["NULL", "NULL"])
+
             if site_col:
                 select_parts.append(f"MAX(`{site_col}`)")
             else:
@@ -718,103 +783,170 @@ def get_generation_hours_data(user, date_from=None, date_to=None, providers=None
                 w = str(r[0]).strip()
                 if not w or w.lower() == 'none':
                     continue
-                h = float(r[1] or 0.0)
-                s = str(r[2]) if r[2] else oem_name
-                wtg_hrs[w]["hrs"] += h
+                o_hrs = float(r[1] or 0.0)
+                g_hrs = float(r[2] or 0.0)
+                cnt = int(r[3] or 0)
+                min_d = parse_date_like(r[4])
+                max_d = parse_date_like(r[5])
+                s = str(r[6]) if r[6] else oem_name
+
+                wtg_hrs[w]["opr_hrs"] += o_hrs
+                wtg_hrs[w]["gen_hrs"] += g_hrs
+                wtg_hrs[w]["hrs"] += o_hrs
+                wtg_hrs[w]["day_count"] += cnt
+                if min_d:
+                    if wtg_hrs[w]["min_date"] is None or min_d < wtg_hrs[w]["min_date"]:
+                        wtg_hrs[w]["min_date"] = min_d
+                    if overall_min_date is None or min_d < overall_min_date:
+                        overall_min_date = min_d
+                if max_d:
+                    if wtg_hrs[w]["max_date"] is None or max_d > wtg_hrs[w]["max_date"]:
+                        wtg_hrs[w]["max_date"] = max_d
+                    if overall_max_date is None or max_d > overall_max_date:
+                        overall_max_date = max_d
+
                 wtg_hrs[w]["oem"] = oem_name
                 wtg_hrs[w]["site"] = s
 
             # Monthly trend
             if date_col:
                 query_m = f"""
-                    SELECT LEFT(`{date_col}`, 7) AS ym, SUM(CAST(`{hrs_col}` AS DECIMAL(15,2)))
+                    SELECT LEFT(`{date_col}`, 7) AS ym,
+                           SUM({opr_expr}),
+                           SUM({gen_expr})
                     FROM `{t}`
                     {where_clause}
                     GROUP BY ym
                     ORDER BY ym
                 """
                 cursor.execute(query_m, params)
-                for ym, mh in cursor.fetchall():
+                for ym, mh_opr, mh_gen in cursor.fetchall():
                     if ym and len(str(ym)) >= 7:
-                        monthly_hrs[str(ym)[:7]] += float(mh or 0.0)
+                        monthly_opr[str(ym)[:7]] += float(mh_opr or 0.0)
+                        monthly_gen[str(ym)[:7]] += float(mh_gen or 0.0)
 
-    sorted_months = sorted(monthly_hrs.keys())
-    if len(sorted_months) > 36 and not date_from:
-        sorted_months = sorted_months[-36:]
-
-    days_count = 1
-    if date_from and date_to:
-        try:
-            d1 = datetime.strptime(str(date_from)[:10], "%Y-%m-%d").date()
-            d2 = datetime.strptime(str(date_to)[:10], "%Y-%m-%d").date()
-            days_count = max(1, (d2 - d1).days + 1)
-        except Exception:
-            days_count = 1
-    elif len(sorted_months) > 0:
-        days_count = max(1, len(sorted_months) * 30)
+    # Date range resolution
+    d1 = parse_date_like(date_from)
+    d2 = parse_date_like(date_to)
+    filter_days = None
+    if d1 and d2 and d2 >= d1:
+        filter_days = (d2 - d1).days + 1
+    elif d1 and not d2:
+        end_ref = overall_max_date or date.today()
+        if end_ref >= d1:
+            filter_days = (end_ref - d1).days + 1
+    elif d2 and not d1:
+        start_ref = overall_min_date or d2
+        if d2 >= start_ref:
+            filter_days = (d2 - start_ref).days + 1
 
     all_wtgs = []
-    total_hours = 0.0
+    total_opr_hours = 0.0
+    total_gen_hours = 0.0
+
     for w, d in wtg_hrs.items():
-        h = round(d["hrs"], 1)
-        daily_avg = round(h / days_count, 1) if days_count > 0 else 0.0
+        o_h = round(d["opr_hrs"], 1)
+        g_h = round(d["gen_hrs"], 1)
+
+        if filter_days:
+            wtg_days = max(1, filter_days)
+        else:
+            if d["min_date"] and d["max_date"] and d["max_date"] >= d["min_date"]:
+                calendar_span = (d["max_date"] - d["min_date"]).days + 1
+                wtg_days = max(calendar_span, d["day_count"], 1)
+            elif d["day_count"] > 0:
+                wtg_days = d["day_count"]
+            elif len(monthly_opr) > 0:
+                wtg_days = max(1, len(monthly_opr) * 30)
+            else:
+                wtg_days = 1
+
+        daily_avg = min(24.0, round(o_h / wtg_days, 1)) if wtg_days > 0 else 0.0
+        daily_gen_avg = min(24.0, round(g_h / wtg_days, 1)) if wtg_days > 0 else 0.0
         util_pct = min(100.0, round((daily_avg / 24.0) * 100, 1))
+        gen_ratio = round((g_h / o_h * 100), 1) if o_h > 0 else 0.0
+        idle_h = round(max(0.0, o_h - g_h), 1)
+
         all_wtgs.append({
             "wtg": w,
-            "total_hrs": h,
+            "total_hrs": o_h,
+            "opr_hrs": o_h,
+            "gen_hrs": g_h,
+            "idle_hrs": idle_h,
+            "gen_ratio": gen_ratio,
             "daily_avg": daily_avg,
+            "daily_gen_avg": daily_gen_avg,
             "util_pct": util_pct,
             "oem": d["oem"],
             "site": d["site"],
+            "days_count": wtg_days,
         })
-        total_hours += d["hrs"]
+        total_opr_hours += o_h
+        total_gen_hours += g_h
 
-    all_wtgs.sort(key=lambda x: x["total_hrs"], reverse=True)
+    all_wtgs.sort(key=lambda x: x["gen_hrs"], reverse=True)
     wtg_count = len(all_wtgs)
-    avg_hours = round(total_hours / wtg_count, 1) if wtg_count > 0 else 0.0
+    avg_opr_hours = round(total_opr_hours / wtg_count, 1) if wtg_count > 0 else 0.0
+    avg_gen_hours = round(total_gen_hours / wtg_count, 1) if wtg_count > 0 else 0.0
 
     table_data = []
     for idx, item in enumerate(all_wtgs, 1):
-        h = item["total_hrs"]
-        share = round((h / total_hours * 100), 2) if total_hours > 0 else 0.0
-        diff_avg = round(((h - avg_hours) / avg_hours * 100), 1) if avg_hours > 0 else 0.0
+        h = item["opr_hrs"]
+        share = round((h / total_opr_hours * 100), 2) if total_opr_hours > 0 else 0.0
+        diff_avg = round(((h - avg_opr_hours) / avg_opr_hours * 100), 1) if avg_opr_hours > 0 else 0.0
         table_data.append({
             "rank": idx,
+            "wtg": item["wtg"],
             "wtg_no": item["wtg"],
             "oem": item["oem"],
             "site": item["site"],
-            "total_hrs": h,
+            "total_hrs": item["opr_hrs"],
+            "opr_hrs": item["opr_hrs"],
+            "gen_hrs": item["gen_hrs"],
+            "idle_hrs": item["idle_hrs"],
+            "gen_ratio": item["gen_ratio"],
             "daily_avg": item["daily_avg"],
+            "daily_gen_avg": item["daily_gen_avg"],
             "util_pct": item["util_pct"],
             "share": share,
             "diff_avg": diff_avg,
-            "status_class": "success" if h >= avg_hours else "warning",
-            "status_text": "High" if h >= avg_hours else "Moderate",
+            "status_class": "success" if h >= avg_opr_hours else "warning",
+            "status_text": "High" if h >= avg_opr_hours else "Moderate",
         })
 
-    monthly_cats = [format_month_label(m) for m in sorted_months]
-    monthly_gen = [round(monthly_hrs[m], 1) for m in sorted_months]
+    all_months = sorted(monthly_opr.keys()) if monthly_opr else sorted(monthly_gen.keys())
+    chart_months = all_months[-36:] if (len(all_months) > 36 and not date_from) else all_months
 
-    peak_item = all_wtgs[0] if all_wtgs else {"wtg": "--", "total_hrs": 0}
+    monthly_cats = [format_month_label(m) for m in chart_months]
+    monthly_opr_series = [round(monthly_opr[m], 1) for m in chart_months]
+    monthly_gen_series = [round(monthly_gen[m], 1) for m in chart_months]
 
-    fleet_daily_avg = round(avg_hours / days_count, 1) if days_count > 0 else 0.0
+    peak_item = all_wtgs[0] if all_wtgs else {"wtg": "--", "opr_hrs": 0, "gen_hrs": 0}
+
+    if wtg_count > 0:
+        fleet_daily_avg = min(24.0, round(sum(item["daily_avg"] for item in all_wtgs) / wtg_count, 1))
+    else:
+        fleet_daily_avg = 0.0
     fleet_util_pct = min(100.0, round((fleet_daily_avg / 24.0) * 100, 1))
 
     return {
         "all_wtgs_json": json.dumps(all_wtgs),
         "monthly_cats_json": json.dumps(monthly_cats),
-        "monthly_gen_json": json.dumps(monthly_gen),
+        "monthly_gen_json": json.dumps(monthly_gen_series),
+        "monthly_opr_json": json.dumps(monthly_opr_series),
         "table_data": table_data,
-        "kpi_total_hrs": round(total_hours, 1),
-        "kpi_avg_hrs": avg_hours,
+        "kpi_total_hrs": round(total_opr_hours, 1),
+        "kpi_total_opr_hrs": round(total_opr_hours, 1),
+        "kpi_total_gen_hrs": round(total_gen_hours, 1),
+        "kpi_avg_hrs": avg_opr_hours,
         "kpi_daily_avg": fleet_daily_avg,
         "kpi_util_factor": fleet_util_pct,
-        "kpi_peak_val": peak_item["total_hrs"],
+        "kpi_peak_val": peak_item["opr_hrs"],
         "kpi_peak_wtg": peak_item["wtg"],
-        "kpi_max_val": peak_item["total_hrs"],
+        "kpi_max_val": peak_item["opr_hrs"],
         "kpi_max_wtg": peak_item["wtg"],
         "kpi_total_wtgs": wtg_count,
-        "total_hours": round(total_hours, 1),
+        "total_hours": round(total_opr_hours, 1),
     }
 
 
@@ -933,6 +1065,7 @@ def get_avg_generation_data(user, date_from=None, date_to=None, providers=None, 
     for idx, item in enumerate(all_wtgs, 1):
         table_data.append({
             "rank": idx,
+            "wtg": item["wtg"],
             "wtg_no": item["wtg"],
             "oem": item["oem"],
             "site": item["site"],
@@ -1069,6 +1202,7 @@ def get_machine_availability_data(user, date_from=None, date_to=None, providers=
     for idx, item in enumerate(all_wtgs, 1):
         table_data.append({
             "rank": idx,
+            "wtg": item["wtg"],
             "wtg_no": item["wtg"],
             "oem": item["oem"],
             "site": item["site"],
@@ -1263,6 +1397,7 @@ def get_grid_availability_data(user, date_from=None, date_to=None, providers=Non
     for idx, item in enumerate(all_wtgs, 1):
         table_data.append({
             "rank": idx,
+            "wtg": item["wtg"],
             "wtg_no": item["wtg"],
             "oem": item["oem"],
             "site": item["site"],
@@ -1330,6 +1465,7 @@ def get_grid_and_machine_data(user, date_from=None, date_to=None, providers=None
     for idx, item in enumerate(combined_wtgs, 1):
         table_data.append({
             "rank": idx,
+            "wtg": item["wtg"],
             "wtg_no": item["wtg"],
             "oem": item["oem"],
             "site": item["site"],
@@ -1384,6 +1520,7 @@ def get_wtg_plf_data(user, date_from=None, date_to=None, providers=None, sites=N
 
         table_data.append({
             "rank": idx,
+            "wtg": w,
             "wtg_no": w,
             "oem": oem,
             "site": g_info.get("site", oem),
@@ -1437,6 +1574,10 @@ def get_breakdown_hours_data(user, date_from=None, date_to=None, providers=None,
     wtg_bd = defaultdict(lambda: {"dur_sum": 0.0, "count": 0, "max_dur": 0.0, "causes": defaultdict(float), "oem": "", "site": ""})
     monthly_bd = defaultdict(float)
     causes_agg = defaultdict(float)
+    gf_sum = 0.0
+    fm_sum = 0.0
+    s_sum = 0.0
+    u_sum = 0.0
 
     with connection.cursor() as cursor:
         for t in target_tables:
@@ -1589,6 +1730,43 @@ def get_breakdown_hours_data(user, date_from=None, date_to=None, providers=None,
                 if c_name and str(c_name).strip() and str(c_name).strip().lower() != 'none':
                     causes_agg[str(c_name).strip()[:40]] += float(c_dur or 0.0)
 
+            # Query GF, FM, S, U breakdown category distribution
+            if dur_c and cause_c:
+                query_gffmsu = f"""
+                    SELECT LOWER(TRIM(`{cause_c}`)), SUM({dur_expr})
+                    FROM `{t}`
+                    {where_str}
+                    GROUP BY LOWER(TRIM(`{cause_c}`))
+                """
+                cursor.execute(query_gffmsu, p_b)
+                for desc, val in cursor.fetchall():
+                    d_val = float(val or 0.0)
+                    s_desc = str(desc or '').lower()
+                    if any(k in s_desc for k in ['grid', 'voltage', 'feeder', 'substation', 'load shedding', 'e/f', 'o/c', 'tripped', 'row', 'external breakdown', 'ga_int', 'ga_ext', 'short circuit', 'ground fault']):
+                        gf_sum += d_val
+                    elif any(k in s_desc for k in ['government', 'calamity', 'cut out', 'force majeure', 'environmental', 'weather', 'rain', 'storm', 'curtailment', 'stoppage', 'utility']):
+                        fm_sum += d_val
+                    elif any(k in s_desc for k in ['preventive', 'maintenance', 'shutdown', 'modification', 'special activity', 'service active', 'scheduled', 'planned', 'yearly', 'half yearly']):
+                        s_sum += d_val
+                    else:
+                        u_sum += d_val
+            elif cols_gen.get('gf'):
+                gf_c = cols_gen['gf']
+                fm_c = cols_gen.get('fm')
+                s_c = cols_gen.get('s')
+                u_c = cols_gen.get('u')
+                sel = [f"SUM(CAST(`{gf_c}` AS DECIMAL(10,2)))"]
+                sel.append(f"SUM(CAST(`{fm_c}` AS DECIMAL(10,2)))" if fm_c else "0")
+                sel.append(f"SUM(CAST(`{s_c}` AS DECIMAL(10,2)))" if s_c else "0")
+                sel.append(f"SUM(CAST(`{u_c}` AS DECIMAL(10,2)))" if u_c else "0")
+                cursor.execute(f"SELECT {', '.join(sel)} FROM `{t}` {where_str}", p_b)
+                r_cat = cursor.fetchone()
+                if r_cat:
+                    gf_sum += float(r_cat[0] or 0.0)
+                    fm_sum += float(r_cat[1] or 0.0)
+                    s_sum += float(r_cat[2] or 0.0)
+                    u_sum += float(r_cat[3] or 0.0)
+
     all_wtgs = []
     total_hrs = 0.0
     total_incidents = 0
@@ -1612,15 +1790,31 @@ def get_breakdown_hours_data(user, date_from=None, date_to=None, providers=None,
 
     table_data = []
     for idx, item in enumerate(all_wtgs, 1):
+        h = item["total_hrs"]
+        cnt = item["incidents"]
+        avg_dur = round(h / cnt, 1) if cnt > 0 else 0.0
+        if avg_hrs > 0:
+            if h >= avg_hrs * 1.5:
+                status = "Critical"
+            elif h >= avg_hrs * 0.8:
+                status = "Moderate"
+            else:
+                status = "Reliable"
+        else:
+            status = "Reliable"
+
         table_data.append({
             "rank": idx,
+            "wtg": item["wtg"],
             "wtg_no": item["wtg"],
             "oem": item["oem"],
             "site": item["site"],
             "total_hrs": item["total_hrs"],
             "hours": item["total_hrs"],
             "incidents": item["incidents"],
+            "avg_incident_dur": avg_dur,
             "max_duration": item["max_duration"],
+            "status": status,
             "top_cause": "System Fault",
         })
 
@@ -1654,6 +1848,18 @@ def get_breakdown_hours_data(user, date_from=None, date_to=None, providers=None,
     kpi_top_cause_hrs = round(sorted_causes[0][1], 1) if sorted_causes else 0.0
     kpi_avg_trip_dur = round(total_hrs / total_incidents, 1) if total_incidents > 0 else 0.0
 
+    if (gf_sum + fm_sum + s_sum + u_sum) == 0 and total_hrs > 0:
+        u_sum = total_hrs
+
+    tot_loss = gf_sum + fm_sum + s_sum + u_sum
+    if tot_loss > 0:
+        gf_pct = round(gf_sum / tot_loss * 100, 1)
+        fm_pct = round(fm_sum / tot_loss * 100, 1)
+        s_pct = round(s_sum / tot_loss * 100, 1)
+        u_pct = round(u_sum / tot_loss * 100, 1)
+    else:
+        gf_pct = fm_pct = s_pct = u_pct = 0.0
+
     return {
         "all_wtgs_json": json.dumps(all_wtgs),
         "monthly_cats_json": json.dumps(monthly_cats),
@@ -1670,6 +1876,14 @@ def get_breakdown_hours_data(user, date_from=None, date_to=None, providers=None,
         "kpi_top_cause": kpi_top_cause,
         "kpi_top_cause_hrs": kpi_top_cause_hrs,
         "kpi_avg_trip_dur": kpi_avg_trip_dur,
+        "kpi_gf_hrs": round(gf_sum, 1),
+        "kpi_fm_hrs": round(fm_sum, 1),
+        "kpi_s_hrs": round(s_sum, 1),
+        "kpi_u_hrs": round(u_sum, 1),
+        "kpi_gf_pct": gf_pct,
+        "kpi_fm_pct": fm_pct,
+        "kpi_s_pct": s_pct,
+        "kpi_u_pct": u_pct,
     }
 
 

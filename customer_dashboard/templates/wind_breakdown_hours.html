@@ -157,17 +157,18 @@
   {% include "includes/wind_filter_bar.html" %}
 
   <!-- KPI SUMMARY CARDS -->
+  <!-- KPI SUMMARY CARDS (GF, FM, S, U) -->
   <div class="row g-3 mb-4">
     <div class="col-xl-3 col-md-6">
       <div class="kpi-card tot-hrs">
         <div class="d-flex justify-content-between align-items-start">
           <div>
-            <div class="kpi-title">Total Breakdown Hours</div>
-            <div class="kpi-value text-danger">{{ kpi_total_hrs|floatformat:1|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
-            <div class="kpi-subtext"><i class="fas fa-clock text-danger me-1"></i> Cumulative downtime across fleet</div>
+            <div class="kpi-title">GF (Grid Fault)</div>
+            <div class="kpi-value text-danger">{{ kpi_gf_hrs|floatformat:1|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
+            <div class="kpi-subtext"><i class="fas fa-tower-broadcast text-danger me-1"></i> {{ kpi_gf_pct }}% of breakdown loss</div>
           </div>
           <div class="p-2 bg-rose-50 text-danger rounded-3">
-            <i class="fas fa-wrench fa-lg"></i>
+            <i class="fas fa-tower-broadcast fa-lg"></i>
           </div>
         </div>
       </div>
@@ -177,12 +178,12 @@
       <div class="kpi-card worst-wtg">
         <div class="d-flex justify-content-between align-items-start">
           <div>
-            <div class="kpi-title">Highest Outage Turbine</div>
-            <div class="kpi-value text-warning">{{ kpi_worst_hrs|floatformat:1|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
-            <div class="kpi-subtext"><i class="fas fa-exclamation-triangle text-warning me-1"></i> Turbine: <strong>{{ kpi_worst_wtg }}</strong></div>
+            <div class="kpi-title">FM (Force Majeure)</div>
+            <div class="kpi-value text-warning">{{ kpi_fm_hrs|floatformat:1|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
+            <div class="kpi-subtext"><i class="fas fa-cloud-bolt text-warning me-1"></i> {{ kpi_fm_pct }}% of breakdown loss</div>
           </div>
           <div class="p-2 bg-amber-50 text-warning rounded-3">
-            <i class="fas fa-triangle-exclamation fa-lg"></i>
+            <i class="fas fa-cloud-bolt fa-lg"></i>
           </div>
         </div>
       </div>
@@ -192,12 +193,12 @@
       <div class="kpi-card avg-hrs">
         <div class="d-flex justify-content-between align-items-start">
           <div>
-            <div class="kpi-title">Mean Downtime / WTG</div>
-            <div class="kpi-value text-primary">{{ kpi_avg_hrs|floatformat:1|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
-            <div class="kpi-subtext"><i class="fas fa-calculator text-primary me-1"></i> Fleet average outage per turbine</div>
+            <div class="kpi-title">S (Scheduled Shutdown)</div>
+            <div class="kpi-value text-purple" style="color: #8b5cf6;">{{ kpi_s_hrs|floatformat:1|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
+            <div class="kpi-subtext"><i class="fas fa-calendar-check me-1" style="color: #8b5cf6;"></i> {{ kpi_s_pct }}% of breakdown loss</div>
           </div>
-          <div class="p-2 bg-blue-50 text-primary rounded-3">
-            <i class="fas fa-hourglass-half fa-lg"></i>
+          <div class="p-2 bg-purple-50 rounded-3" style="color: #8b5cf6;">
+            <i class="fas fa-calendar-check fa-lg"></i>
           </div>
         </div>
       </div>
@@ -207,12 +208,12 @@
       <div class="kpi-card tot-trips">
         <div class="d-flex justify-content-between align-items-start">
           <div>
-            <div class="kpi-title">Total Incident Trips</div>
-            <div class="kpi-value text-purple">{{ kpi_total_incidents|intcomma }}</div>
-            <div class="kpi-subtext"><i class="fas fa-bolt text-purple me-1"></i> Across {{ kpi_total_wtgs }} turbines</div>
+            <div class="kpi-title">U (Unscheduled Breakdown)</div>
+            <div class="kpi-value text-primary">{{ kpi_u_hrs|floatformat:1|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
+            <div class="kpi-subtext"><i class="fas fa-triangle-exclamation text-primary me-1"></i> {{ kpi_u_pct }}% of breakdown loss</div>
           </div>
-          <div class="p-2 bg-purple-50 text-purple rounded-3">
-            <i class="fas fa-clipboard-list fa-lg"></i>
+          <div class="p-2 bg-blue-50 text-primary rounded-3">
+            <i class="fas fa-triangle-exclamation fa-lg"></i>
           </div>
         </div>
       </div>
@@ -314,14 +315,14 @@
           <tr>
             <td class="fw-bold text-center">{{ row.rank }}</td>
             <td class="fw-bold text-primary">
-              <a href="{% url 'wind_drill_down' %}?wtg={{ row.wtg }}" class="text-decoration-none">
-                <i class="fas fa-fan me-1 text-muted"></i>{{ row.wtg }}
+              <a href="{% url 'wind_drill_down' %}?wtg={{ row.wtg|default:row.wtg_no }}" class="text-decoration-none">
+                <i class="fas fa-fan me-1 text-muted"></i>{{ row.wtg|default:row.wtg_no }}
               </a>
             </td>
             <td><span class="badge bg-light text-dark border">{{ row.oem }}</span></td>
             <td class="fw-bold text-danger">{{ row.hours|floatformat:1|intcomma }} hrs</td>
             <td class="fw-semibold text-dark">{{ row.incidents|intcomma }}</td>
-            <td class="text-muted">{{ row.avg_incident_dur }} hrs</td>
+            <td class="text-muted">{{ row.avg_incident_dur|default:"0.0" }} hrs</td>
             <td>
               {% if row.status == 'Critical' %}
                 <span class="badge badge-critical px-2 py-1"><i class="fas fa-circle-exclamation me-1"></i>High Outage</span>
