@@ -421,8 +421,8 @@
           <tr>
             <td class="fw-bold text-center">{{ row.rank }}</td>
             <td class="fw-bold text-primary">
-              <a href="{% url 'wind_drill_down' %}?wtg={{ row.wtg }}" class="text-decoration-none">
-                <i class="fas fa-fan me-1 text-muted"></i>{{ row.wtg }}
+              <a href="{% url 'wind_drill_down' %}?wtg={{ row.wtg|default:row.wtg_no }}" class="text-decoration-none">
+                <i class="fas fa-fan me-1 text-muted"></i>{{ row.wtg|default:row.wtg_no }}
               </a>
             </td>
             <td><span class="badge bg-light text-dark border">{{ row.oem }}</span></td>

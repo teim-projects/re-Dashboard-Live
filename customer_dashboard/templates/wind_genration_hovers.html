@@ -158,11 +158,26 @@
         <div class="d-flex justify-content-between align-items-start">
           <div>
             <div class="kpi-title">Fleet Operating Hours</div>
-            <div class="kpi-value text-primary">{{ kpi_total_hrs|floatformat:0|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
-            <div class="kpi-subtext"><i class="fas fa-clock text-primary me-1"></i> Cumulative generation uptime</div>
+            <div class="kpi-value text-primary">{{ kpi_total_opr_hrs|default:kpi_total_hrs|floatformat:0|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
+            <div class="kpi-subtext"><i class="fas fa-clock text-primary me-1"></i> Cumulative available runtime</div>
           </div>
           <div class="p-2 bg-blue-50 text-primary rounded-3">
             <i class="fas fa-clock fa-lg"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-3 col-md-6">
+      <div class="kpi-card" style="border-top: 4px solid #10b981;">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="kpi-title">Fleet Generation Hours</div>
+            <div class="kpi-value text-success">{{ kpi_total_gen_hrs|floatformat:0|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
+            <div class="kpi-subtext"><i class="fas fa-bolt text-success me-1"></i> Active grid generation</div>
+          </div>
+          <div class="p-2 bg-emerald-50 text-success rounded-3">
+            <i class="fas fa-bolt fa-lg"></i>
           </div>
         </div>
       </div>
@@ -173,26 +188,11 @@
         <div class="d-flex justify-content-between align-items-start">
           <div>
             <div class="kpi-title">Mean Daily Run Hours</div>
-            <div class="kpi-value text-success">{{ kpi_daily_avg|floatformat:1 }} <span style="font-size: 1rem; font-weight: 500;">hrs/day</span></div>
-            <div class="kpi-subtext"><i class="fas fa-bolt text-success me-1"></i> Out of 24.0 available hours</div>
+            <div class="kpi-value text-purple" style="color: #8b5cf6;">{{ kpi_daily_avg|floatformat:1 }} <span style="font-size: 1rem; font-weight: 500;">hrs/day</span></div>
+            <div class="kpi-subtext"><i class="fas fa-hourglass-start me-1" style="color: #8b5cf6;"></i> Out of 24.0 available hours</div>
           </div>
-          <div class="p-2 bg-emerald-50 text-success rounded-3">
+          <div class="p-2 bg-purple-50 rounded-3" style="color: #8b5cf6;">
             <i class="fas fa-hourglass-start fa-lg"></i>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-xl-3 col-md-6">
-      <div class="kpi-card max-hrs">
-        <div class="d-flex justify-content-between align-items-start">
-          <div>
-            <div class="kpi-title">Peak Run-Time Turbine</div>
-            <div class="kpi-value text-purple">{{ kpi_max_val|floatformat:0|intcomma }} <span style="font-size: 1rem; font-weight: 500;">hrs</span></div>
-            <div class="kpi-subtext"><i class="fas fa-trophy text-purple me-1"></i> Turbine: <strong>{{ kpi_max_wtg }}</strong></div>
-          </div>
-          <div class="p-2 bg-purple-50 text-purple rounded-3">
-            <i class="fas fa-award fa-lg"></i>
           </div>
         </div>
       </div>
@@ -219,10 +219,10 @@
     <div class="chart-header">
       <div>
         <h5 class="chart-title">
-          <i class="fas fa-chart-bar text-primary"></i>
-          Turbine Operating / Generation Hours Ranking
+          <i class="fas fa-scale-balanced text-primary"></i>
+          Turbine Operating vs Generation Hours Comparison
         </h5>
-        <div class="chart-subtitle">Clean horizontal ranking isolating high-operating turbines vs low-runtime units</div>
+        <div class="chart-subtitle">Side-by-side grouped horizontal comparison isolating available operating runtime vs active generation hours</div>
       </div>
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <div class="d-flex gap-1" id="rankingSwitcher">
@@ -253,10 +253,10 @@
     </div>
   </div>
 
-  <!-- MONTHLY TREND & HEALTH DONUT -->
+  <!-- MONTHLY TREND -->
   <div class="row g-4 mb-4">
-    <div class="col-lg-8">
-      <div class="chart-card h-100 mb-0">
+    <div class="col-12">
+      <div class="chart-card mb-0">
         <div class="chart-header">
           <div>
             <h5 class="chart-title"><i class="fas fa-chart-line text-info"></i> Monthly Generation Hours Trajectory</h5>
@@ -269,26 +269,12 @@
         </div>
       </div>
     </div>
-
-    <div class="col-lg-4">
-      <div class="chart-card h-100 mb-0">
-        <div class="chart-header">
-          <div>
-            <h5 class="chart-title"><i class="fas fa-pie-chart text-success"></i> Operational Utilization Tiers</h5>
-            <div class="chart-subtitle">Turbines grouped by daily run-hours</div>
-          </div>
-        </div>
-        <div class="p-3">
-          <div id="genHealthDonutChart" style="min-height: 400px;"></div>
-        </div>
-      </div>
-    </div>
   </div>
 
-  <!-- TURBINE OPERATING HOURS TABLE -->
+  <!-- TURBINE OPERATING & GENERATION HOURS TABLE -->
   <div class="table-card">
     <div class="d-flex justify-content-between align-items-center mb-3">
-      <h5 class="fw-bold text-dark m-0"><i class="fas fa-table me-2 text-primary"></i>Turbine Generation Hours Ledger</h5>
+      <h5 class="fw-bold text-dark m-0"><i class="fas fa-table me-2 text-primary"></i>Turbine Operating vs Generation Hours Ledger</h5>
       <span class="badge bg-light text-muted border px-3 py-2">Total Turbines: {{ table_data|length }}</span>
     </div>
     <div class="table-responsive">
@@ -298,9 +284,11 @@
             <th style="width: 60px;">Rank</th>
             <th>Turbine ID</th>
             <th>OEM Provider</th>
-            <th>Total Generation Hours</th>
+            <th>Operating Hours</th>
+            <th>Generation Hours</th>
+            <th>Idle / Lull Hours</th>
             <th>Daily Mean Run-Hours</th>
-            <th>Run Time Factor</th>
+            <th>Operational Factor</th>
             <th>Operational Status</th>
           </tr>
         </thead>
@@ -314,9 +302,11 @@
               </a>
             </td>
             <td><span class="badge bg-light text-dark border">{{ row.oem }}</span></td>
-            <td class="fw-bold text-dark">{{ row.total_hrs|floatformat:1|intcomma }} hrs</td>
-            <td class="fw-semibold text-primary">{{ row.daily_avg|floatformat:1 }} hrs/day</td>
-            <td class="fw-semibold text-success">{{ row.util_pct|floatformat:1 }}%</td>
+            <td class="fw-bold text-primary">{{ row.opr_hrs|default:row.total_hrs|floatformat:1|intcomma }} hrs</td>
+            <td class="fw-bold text-success">{{ row.gen_hrs|default:row.total_hrs|floatformat:1|intcomma }} hrs</td>
+            <td class="text-muted fw-semibold">{{ row.idle_hrs|default:0|floatformat:1|intcomma }} hrs</td>
+            <td class="fw-semibold text-dark">{{ row.daily_avg|floatformat:1 }} hrs/day</td>
+            <td class="fw-semibold text-warning">{{ row.util_pct|floatformat:1 }}%</td>
             <td>
               {% if row.daily_avg >= 20.0 %}
                 <span class="badge badge-optimal px-2 py-1"><i class="fas fa-circle-check me-1"></i>High Run-Time</span>
@@ -344,6 +334,7 @@
   const fullWtgData = {{ all_wtgs_json|safe|default:"[]" }};
   const monthlyCats = {{ monthly_cats_json|safe|default:"[]" }};
   const monthlyGen = {{ monthly_gen_json|safe|default:"[]" }};
+  const monthlyOpr = {{ monthly_opr_json|safe|default:"[]" }};
 
   let rankingChartInstance = null;
   let chartSourceData = [...fullWtgData];
@@ -402,55 +393,55 @@
     }
 
     const categories = subset.map(d => d.wtg);
-    const seriesData = subset.map(d => d.total_hrs);
+    const oprData = subset.map(d => Number(d.opr_hrs !== undefined ? d.opr_hrs : d.total_hrs));
+    const genData = subset.map(d => Number(d.gen_hrs !== undefined ? d.gen_hrs : d.total_hrs));
 
     const options = {
-      series: [{ name: "Generation Hours", data: seriesData }],
+      series: [
+        { name: "Operating Hours", data: oprData },
+        { name: "Generation Hours", data: genData }
+      ],
       chart: {
         type: "bar",
-        height: Math.max(450, subset.length * 34),
+        height: Math.max(500, subset.length * 48),
         toolbar: { show: true, tools: { download: true } }
       },
       plotOptions: {
         bar: {
           horizontal: true,
-          barHeight: "68%",
-          borderRadius: 6,
-          distributed: false,
+          barHeight: "72%",
+          borderRadius: 4,
           dataLabels: { position: "top" }
         }
       },
-      colors: [isBottomMode ? '#fda4af' : '#818cf8'],
-      fill: {
-        type: 'gradient',
-        gradient: {
-          shade: 'light',
-          type: 'horizontal',
-          shadeIntensity: 0.25,
-          gradientToColors: [isBottomMode ? '#fcd34d' : '#34d399'],
-          inverseColors: false,
-          opacityFrom: 0.95,
-          opacityTo: 0.85,
-          stops: [0, 100]
-        }
-      },
+      colors: isBottomMode ? ["#fb923c", "#f87171"] : ["#3b82f6", "#10b981"],
       dataLabels: {
         enabled: true,
         formatter: (val) => val > 0 ? Math.round(val).toLocaleString() + " hrs" : "",
-        offsetX: 24,
-        style: { fontSize: "11px", colors: ["#334155"], fontWeight: 700 }
+        offsetX: 20,
+        style: { fontSize: "10px", colors: ["#334155"], fontWeight: 700 }
       },
       xaxis: {
         categories: categories,
-        title: { text: "Operating Hours" },
+        title: { text: "Hours (hrs)" },
         labels: { formatter: (v) => Math.round(v).toLocaleString() }
       },
       yaxis: {
         labels: { style: { fontWeight: 600, fontSize: "11px" } }
       },
-      legend: { show: false },
+      legend: {
+        show: true,
+        position: "top",
+        horizontalAlign: "right",
+        fontSize: "12px",
+        markers: { radius: 3 }
+      },
       tooltip: {
-        y: { formatter: (v) => Math.round(v).toLocaleString() + " hrs" }
+        shared: true,
+        intersect: false,
+        y: {
+          formatter: (v) => Math.round(v).toLocaleString() + " hrs"
+        }
       },
       grid: { borderColor: "#f1f5f9" }
     };
@@ -470,65 +461,45 @@
     renderPaginatedChart();
   };
 
-  // Monthly Spline Chart
+  // Monthly Spline Chart with Dual Comparison
   function renderMonthlyTrend() {
+    const series = [];
+    if (Array.isArray(monthlyOpr) && monthlyOpr.length > 0) {
+      series.push({ name: "Fleet Operating Hours", data: monthlyOpr });
+    }
+    if (Array.isArray(monthlyGen) && monthlyGen.length > 0) {
+      series.push({ name: "Fleet Generation Hours", data: monthlyGen });
+    }
+    if (series.length === 0) {
+      series.push({ name: "Fleet Generation Hours", data: monthlyGen });
+    }
+
     const options = {
-      series: [{ name: "Fleet Generation Hours", data: monthlyGen }],
+      series: series,
       chart: {
         type: "area",
-        height: 400,
+        height: 380,
         toolbar: { show: false }
       },
-      colors: ["#818cf8"],
+      colors: ["#3b82f6", "#10b981"],
       fill: {
         type: "gradient",
-        gradient: { shadeIntensity: 1, opacityFrom: 0.38, opacityTo: 0.04, stops: [0, 90, 100] }
+        gradient: { shadeIntensity: 1, opacityFrom: 0.35, opacityTo: 0.04, stops: [0, 90, 100] }
       },
       dataLabels: { enabled: false },
       stroke: { curve: "smooth", width: 2.5 },
       xaxis: { categories: monthlyCats },
       yaxis: { labels: { formatter: v => Math.round(v).toLocaleString() + "h" } },
+      legend: { show: true, position: "top", horizontalAlign: "right" },
       tooltip: { y: { formatter: v => Math.round(v).toLocaleString() + " hrs" } },
       grid: { borderColor: "#f1f5f9" }
     };
     new ApexCharts(document.querySelector("#monthlyGenTrendChart"), options).render();
   }
 
-  // Utilization Donut Chart
-  function renderHealthDonut() {
-    const el = document.querySelector("#genHealthDonutChart");
-    if (!el) return;
-
-    let high = 0, mid = 0, low = 0;
-    if (Array.isArray(fullWtgData) && fullWtgData.length > 0) {
-      fullWtgData.forEach(d => {
-        const avg = (d.daily_avg !== undefined && d.daily_avg !== null) ? Number(d.daily_avg) : (d.total_hrs > 0 ? d.total_hrs / 30 : 0);
-        if (avg >= 18.0) high++;
-        else if (avg >= 12.0) mid++;
-        else low++;
-      });
-    }
-
-    if (high === 0 && mid === 0 && low === 0) {
-      el.innerHTML = '<div class="d-flex align-items-center justify-content-center text-muted small h-100 p-4" style="min-height:300px;"><i class="fas fa-info-circle me-2"></i>No utilization data available for selected filter</div>';
-      return;
-    }
-
-    const options = {
-      series: [high, mid, low],
-      labels: ["Optimal (>=18 hrs/day)", "Moderate (12-18 hrs/day)", "Underutilized (<12 hrs/day)"],
-      chart: { type: "donut", height: 400 },
-      colors: ["#34d399", "#818cf8", "#fbbf24"],
-      legend: { position: "bottom", fontSize: "11px" },
-      dataLabels: { enabled: true }
-    };
-    new ApexCharts(el, options).render();
-  }
-
   document.addEventListener("DOMContentLoaded", function() {
     renderPaginatedChart();
     renderMonthlyTrend();
-    renderHealthDonut();
 
     const pageSizeSelect = document.getElementById("chartPageSize");
     if (pageSizeSelect) {

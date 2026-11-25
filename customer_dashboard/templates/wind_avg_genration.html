@@ -214,15 +214,15 @@
     </div>
   </div>
 
-  <!-- HORIZONTAL DAILY AVERAGE GENERATION RANKING -->
+  <!-- DAILY AVERAGE GENERATION COLUMN RANKING -->
   <div class="chart-card">
     <div class="chart-header">
       <div>
         <h5 class="chart-title">
-          <i class="fas fa-chart-bar text-primary"></i>
+          <i class="fas fa-chart-column text-success"></i>
           Turbine Daily Average Generation (kWh/day)
         </h5>
-        <div class="chart-subtitle">Clean horizontal ranking isolating high-yielding turbines vs underproducing units</div>
+        <div class="chart-subtitle">Vertical comparative yield benchmark across active turbines</div>
       </div>
       <div class="d-flex align-items-center gap-2 flex-wrap">
         <div class="d-flex gap-1" id="rankingSwitcher">
@@ -243,7 +243,7 @@
       </div>
     </div>
     <div class="p-3">
-      <div id="avgGenRankingChart" style="min-height: 480px;"></div>
+      <div id="avgGenRankingChart" style="min-height: 440px;"></div>
       <div class="d-flex justify-content-between align-items-center pt-2 mt-2 border-top flex-wrap gap-2 text-muted small">
         <span id="chartPaginationInfo" class="badge bg-light text-dark border px-2 py-1 font-monospace">Loading...</span>
         <nav aria-label="Chart Pagination">
@@ -253,10 +253,10 @@
     </div>
   </div>
 
-  <!-- MONTHLY TREND & YIELD DONUT -->
+  <!-- MONTHLY DAILY MEAN TRAJECTORY -->
   <div class="row g-4 mb-4">
-    <div class="col-lg-8">
-      <div class="chart-card h-100 mb-0">
+    <div class="col-12">
+      <div class="chart-card mb-0">
         <div class="chart-header">
           <div>
             <h5 class="chart-title"><i class="fas fa-chart-line text-info"></i> Monthly Daily Mean Trajectory</h5>
@@ -266,20 +266,6 @@
         </div>
         <div class="p-3">
           <div id="monthlyAvgGenTrendChart" style="min-height: 400px;"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-lg-4">
-      <div class="chart-card h-100 mb-0">
-        <div class="chart-header">
-          <div>
-            <h5 class="chart-title"><i class="fas fa-pie-chart text-success"></i> Yield Performance Tiers</h5>
-            <div class="chart-subtitle">Turbines grouped by daily production band</div>
-          </div>
-        </div>
-        <div class="p-3">
-          <div id="yieldHealthDonutChart" style="min-height: 400px;"></div>
         </div>
       </div>
     </div>
@@ -310,8 +296,8 @@
           <tr>
             <td class="fw-bold text-center">{{ row.rank }}</td>
             <td class="fw-bold text-primary">
-              <a href="{% url 'wind_drill_down' %}?wtg={{ row.wtg }}" class="text-decoration-none">
-                <i class="fas fa-fan me-1 text-muted"></i>{{ row.wtg }}
+              <a href="{% url 'wind_drill_down' %}?wtg={{ row.wtg|default:row.wtg_no }}" class="text-decoration-none">
+                <i class="fas fa-fan me-1 text-muted"></i>{{ row.wtg|default:row.wtg_no }}
               </a>
             </td>
             <td><span class="badge bg-light text-dark border">{{ row.oem }}</span></td>
@@ -410,26 +396,26 @@
       series: [{ name: "Daily Mean Generation (kWh/day)", data: seriesData }],
       chart: {
         type: "bar",
-        height: Math.max(450, subset.length * 34),
+        height: 440,
         toolbar: { show: true, tools: { download: true } }
       },
       plotOptions: {
         bar: {
-          horizontal: true,
-          barHeight: "68%",
-          borderRadius: 6,
-          distributed: false,
+          horizontal: false,
+          columnWidth: subset.length <= 2 ? "28%" : (subset.length <= 5 ? "45%" : "60%"),
+          borderRadius: 8,
+          borderRadiusApplication: "end",
           dataLabels: { position: "top" }
         }
       },
-      colors: [isBottomMode ? '#fda4af' : '#818cf8'],
+      colors: [isBottomMode ? '#f59e0b' : '#10b981'],
       fill: {
         type: 'gradient',
         gradient: {
           shade: 'light',
-          type: 'horizontal',
-          shadeIntensity: 0.25,
-          gradientToColors: [isBottomMode ? '#fcd34d' : '#34d399'],
+          type: 'vertical',
+          shadeIntensity: 0.3,
+          gradientToColors: [isBottomMode ? '#ef4444' : '#06b6d4'],
           inverseColors: false,
           opacityFrom: 0.95,
           opacityTo: 0.85,
@@ -439,22 +425,30 @@
       dataLabels: {
         enabled: true,
         formatter: (val) => val > 0 ? Math.round(val).toLocaleString() + " kWh" : "",
-        offsetX: 24,
-        style: { fontSize: "11px", colors: ["#334155"], fontWeight: 700 }
+        offsetY: -22,
+        style: { fontSize: "11px", colors: ["#1e293b"], fontWeight: 700 }
       },
       xaxis: {
         categories: categories,
-        title: { text: "Daily Generation (kWh/day)" },
-        labels: { formatter: (v) => Math.round(v).toLocaleString() }
+        title: { text: "Turbine ID", style: { fontSize: "12px", fontWeight: 600, color: "#64748b" } },
+        labels: { style: { fontWeight: 600, fontSize: "12px", colors: "#334155" } }
       },
       yaxis: {
-        labels: { style: { fontWeight: 600, fontSize: "11px" } }
+        title: { text: "Daily Generation (kWh/day)", style: { fontSize: "12px", fontWeight: 600, color: "#64748b" } },
+        labels: { formatter: (v) => Math.round(v).toLocaleString(), style: { fontWeight: 500, fontSize: "11px" } }
       },
       legend: { show: false },
       tooltip: {
-        y: { formatter: (v) => Math.round(v).toLocaleString() + " kWh/day" }
+        theme: 'light',
+        y: {
+          formatter: function(val, { dataPointIndex }) {
+            const item = subset[dataPointIndex] || {};
+            const plf = item.plf !== undefined ? item.plf : '--';
+            return `${Math.round(val).toLocaleString()} kWh/day (PLF: ${plf}%)`;
+          }
+        }
       },
-      grid: { borderColor: "#f1f5f9" }
+      grid: { borderColor: "#f1f5f9", strokeDashArray: 4 }
     };
 
     if (rankingChartInstance) {
@@ -481,7 +475,7 @@
         height: 400,
         toolbar: { show: false }
       },
-      colors: ["#818cf8"],
+      colors: ["#10b981"],
       fill: {
         type: "gradient",
         gradient: { shadeIntensity: 1, opacityFrom: 0.38, opacityTo: 0.04, stops: [0, 90, 100] }
@@ -496,27 +490,9 @@
     new ApexCharts(document.querySelector("#monthlyAvgGenTrendChart"), options).render();
   }
 
-  // Yield Donut Chart
-  function renderHealthDonut() {
-    let high = fullWtgData.filter(d => d.daily_avg >= 10000).length;
-    let mid = fullWtgData.filter(d => d.daily_avg >= 6000 && d.daily_avg < 10000).length;
-    let low = fullWtgData.filter(d => d.daily_avg < 6000).length;
-
-    const options = {
-      series: [high, mid, low],
-      labels: ["High Yield (>=10k kWh/d)", "Medium Yield (6k-10k kWh/d)", "Low Yield (<6k kWh/d)"],
-      chart: { type: "donut", height: 400 },
-      colors: ["#34d399", "#818cf8", "#fbbf24"],
-      legend: { position: "bottom", fontSize: "11px" },
-      dataLabels: { enabled: true }
-    };
-    new ApexCharts(document.querySelector("#yieldHealthDonutChart"), options).render();
-  }
-
   document.addEventListener("DOMContentLoaded", function() {
     renderPaginatedChart();
     renderMonthlyTrend();
-    renderHealthDonut();
 
     const pageSizeSelect = document.getElementById("chartPageSize");
     if (pageSizeSelect) {
